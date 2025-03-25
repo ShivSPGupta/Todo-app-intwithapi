@@ -15,8 +15,8 @@ This is an advanced To-Do application built with React, Redux Toolkit, and Vite.
 ## Installation & Setup
 ### 1. Clone the Repository
 ```sh
-git clone https://github.com/your-repo/advanced-todo-app.git
-cd advanced-todo-app
+git clone https://github.com/ShivSPGupta/Todo-app-intwithapi.git
+cd todo-app
 ```
 
 ### 2. Install Dependencies
