@@ -1,13 +1,17 @@
 # Advanced To-Do App
 
 ## Overview
-This is an advanced To-Do application built with React, Redux Toolkit, and Vite. The app features task management with priority sorting, authentication simulation using Redux, weather integration for relevant tasks, and persistent storage for tasks and authentication status.
+This is a dashboard-style productivity app built with React, Redux Toolkit, and Vite. It goes beyond a basic checklist with task metadata, workflow statuses, effort sizing, inline editing, smart task recommendations, filtering, due dates, completion analytics, authentication simulation, weather-aware planning, and persistent storage.
 
 ## Features
-- **Task Management**: Add, remove, and prioritize tasks (High, Medium, Low).
+- **Task Management**: Add, remove, edit, and prioritize tasks with notes, due dates, effort, workflow status, and categories.
+- **Smart Focus Queue**: Automatically recommends the next best task using priority, urgency, effort, workflow state, and weather suitability.
+- **Workflow Tracking**: Move tasks through Backlog, In Progress, and Done without leaving the list.
+- **Smart Filtering**: Search by text, filter by status, priority, or category, and sort by priority, due date, completion, or recency.
+- **Progress Tracking**: See completion stats, overdue counts, and progress percentage at a glance.
 - **Authentication Simulation**: Login/logout functionality using Redux state management.
 - **Protected Routes**: To-Do list is only accessible to logged-in users.
-- **Weather Integration**: Fetch weather data for outdoor-related tasks using OpenWeather API.
+- **Weather-Aware Planning**: Fetches live weather for outdoor tasks, scores suitability, and adjusts recommendations when conditions are poor.
 - **Persistent Storage**: Tasks stored in localStorage and authentication status in sessionStorage.
 - **Fully Responsive Design**: Built with Bootstrap for a mobile-first, responsive UI.
 - **Vite for Fast Development**: Uses Vite for lightning-fast hot module replacement (HMR) and optimized builds.
@@ -24,7 +28,14 @@ cd todo-app
 npm install
 ```
 
-### 3. Run the Development Server
+### 3. Configure Weather API
+Create a `.env.local` file in the project root and add your OpenWeather API key:
+```sh
+VITE_OPENWEATHER_API_KEY=your_openweather_api_key
+VITE_OPENWEATHER_CITY=London
+```
+
+### 4. Run the Development Server
 ```sh
 npm run dev
 ```
@@ -41,7 +52,7 @@ The app will be available at `http://localhost:5173/`.
 - **Redux Toolkit**: State management.
 - **React Router**: Navigation and protected routes.
 - **Bootstrap**: Responsive design.
-- **OpenWeather API**: Fetches weather data.
+- **OpenWeather API**: Powers context-aware outdoor task planning and recommendation scoring.
 - **Vite**: Fast development and optimized builds.
 
 ## License

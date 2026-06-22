@@ -8,7 +8,7 @@ import { useSelector } from 'react-redux';
 
 const PrivateRoute = ({ element }) => {
   const isAuthenticated = useSelector(state => state.auth.isAuthenticated);
-  return isAuthenticated ? element : <Navigate to="/login" />;
+  return isAuthenticated ? element : <Navigate to="/login" replace />;
 };
 
 function App() {
@@ -18,6 +18,7 @@ function App() {
         <Routes>
           <Route path="/" element={<PrivateRoute element={<ToDo />} />} />
           <Route path="/login" element={<Login />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Router>
     </Provider>
