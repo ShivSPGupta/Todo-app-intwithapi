@@ -1,5 +1,17 @@
-import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
 import axios from 'axios';
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  getDocs,
+  orderBy,
+  query,
+  updateDoc,
+  writeBatch,
+} from 'firebase/firestore';
+import { db } from '../firebase/config';
 
 const WEATHER_TASK_PATTERN = /(outdoor|park|walk|run|travel|event)/i;
 const OPENWEATHER_API_KEY = import.meta.env.VITE_OPENWEATHER_API_KEY;
@@ -40,6 +52,7 @@ const defaultTaskFields = {
   category: 'Personal',
   notes: '',
   createdAt: Date.now(),
+  updatedAt: Date.now(),
 };
 
 const normalizeTask = (task) => ({
@@ -54,21 +67,102 @@ const normalizeTask = (task) => ({
   category: task.category || 'Personal',
   notes: task.notes || '',
   createdAt: task.createdAt || Date.now(),
+  updatedAt: task.updatedAt || Date.now(),
 });
 
-const readStoredTasks = () => {
-  try {
-    const storedTasks = localStorage.getItem('tasks');
-    const parsedTasks = storedTasks ? JSON.parse(storedTasks) : [];
-    return Array.isArray(parsedTasks) ? parsedTasks.map(normalizeTask) : [];
-  } catch {
-    return [];
+const userTasksCollection = (uid) => collection(db, 'users', uid, 'tasks');
+
+const requireUserId = (getState) => {
+  const userId = getState().auth.user?.uid;
+  if (!userId) {
+    throw new Error('You need to sign in to manage tasks.');
   }
+  return userId;
 };
 
-const persistTasks = (tasks) => {
-  localStorage.setItem('tasks', JSON.stringify(tasks));
-};
+export const fetchTasks = createAsyncThunk('tasks/fetchTasks', async (_, { getState }) => {
+  const userId = requireUserId(getState);
+  const tasksQuery = query(userTasksCollection(userId), orderBy('createdAt', 'desc'));
+  const snapshot = await getDocs(tasksQuery);
+
+  return snapshot.docs.map((item) => normalizeTask({ id: item.id, ...item.data() }));
+});
+
+export const addTask = createAsyncThunk('tasks/addTask', async (task, { getState }) => {
+  const userId = requireUserId(getState);
+  const payload = normalizeTask({
+    ...task,
+    status: 'Backlog',
+    completed: false,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  });
+
+  const docRef = await addDoc(userTasksCollection(userId), payload);
+  return { ...payload, id: docRef.id };
+});
+
+export const removeTask = createAsyncThunk('tasks/removeTask', async (taskId, { getState }) => {
+  const userId = requireUserId(getState);
+  await deleteDoc(doc(db, 'users', userId, 'tasks', taskId));
+  return taskId;
+});
+
+export const toggleTaskComplete = createAsyncThunk('tasks/toggleTaskComplete', async (taskId, { getState }) => {
+  const userId = requireUserId(getState);
+  const currentTask = getState().tasks.tasks.find((task) => task.id === taskId);
+
+  if (!currentTask) {
+    throw new Error('Task not found.');
+  }
+
+  const isDone = currentTask.status === 'Done';
+  const updates = {
+    status: isDone ? 'In Progress' : 'Done',
+    completed: !isDone,
+    updatedAt: Date.now(),
+  };
+
+  await updateDoc(doc(db, 'users', userId, 'tasks', taskId), updates);
+  return { id: taskId, updates };
+});
+
+export const updateTaskStatus = createAsyncThunk('tasks/updateTaskStatus', async ({ id, status }, { getState }) => {
+  const userId = requireUserId(getState);
+  const updates = {
+    status,
+    completed: status === 'Done',
+    updatedAt: Date.now(),
+  };
+
+  await updateDoc(doc(db, 'users', userId, 'tasks', id), updates);
+  return { id, updates };
+});
+
+export const updateTask = createAsyncThunk('tasks/updateTask', async ({ id, updates }, { getState }) => {
+  const userId = requireUserId(getState);
+  const payload = {
+    ...updates,
+    completed: updates.status === 'Done',
+    updatedAt: Date.now(),
+  };
+
+  await updateDoc(doc(db, 'users', userId, 'tasks', id), payload);
+  return { id, updates: payload };
+});
+
+export const clearCompleted = createAsyncThunk('tasks/clearCompleted', async (_, { getState }) => {
+  const userId = requireUserId(getState);
+  const doneTasks = getState().tasks.tasks.filter((task) => task.status === 'Done');
+  const batch = writeBatch(db);
+
+  doneTasks.forEach((task) => {
+    batch.delete(doc(db, 'users', userId, 'tasks', task.id));
+  });
+
+  await batch.commit();
+  return doneTasks.map((task) => task.id);
+});
 
 export const fetchWeather = createAsyncThunk('tasks/fetchWeather', async (task) => {
   if (!WEATHER_TASK_PATTERN.test(task.text)) {
@@ -90,78 +184,95 @@ export const fetchWeather = createAsyncThunk('tasks/fetchWeather', async (task) 
   return summarizeWeather(response.data);
 });
 
+const applyTaskUpdates = (tasks, taskId, updates) => tasks.map((task) => (
+  task.id === taskId ? normalizeTask({ ...task, ...updates }) : task
+));
+
 const taskSlice = createSlice({
   name: 'tasks',
   initialState: {
-    tasks: readStoredTasks(),
+    tasks: [],
+    tasksStatus: 'idle',
+    taskError: null,
     weather: null,
     weatherStatus: 'idle',
     weatherError: null,
   },
   reducers: {
-    addTask: (state, action) => {
-      state.tasks = [...state.tasks, normalizeTask(action.payload)];
-      persistTasks(state.tasks);
-    },
-    removeTask: (state, action) => {
-      state.tasks = state.tasks.filter((task) => task.id !== action.payload);
-      persistTasks(state.tasks);
-    },
-    toggleTaskComplete: (state, action) => {
-      const task = state.tasks.find((item) => item.id === action.payload);
-      if (task) {
-        const isDone = task.status === 'Done';
-        task.status = isDone ? 'In Progress' : 'Done';
-        task.completed = !isDone;
-        persistTasks(state.tasks);
-      }
-    },
-    updateTaskStatus: (state, action) => {
-      const { id, status } = action.payload;
-      const task = state.tasks.find((item) => item.id === id);
-      if (task) {
-        task.status = status;
-        task.completed = status === 'Done';
-        persistTasks(state.tasks);
-      }
-    },
-    updateTask: (state, action) => {
-      const { id, updates } = action.payload;
-      const task = state.tasks.find((item) => item.id === id);
-      if (task) {
-        Object.assign(task, updates);
-        task.completed = task.status === 'Done';
-        persistTasks(state.tasks);
-      }
-    },
-    clearCompleted: (state) => {
-      state.tasks = state.tasks.filter((task) => task.status !== 'Done');
-      persistTasks(state.tasks);
+    resetTasks: (state) => {
+      state.tasks = [];
+      state.tasksStatus = 'idle';
+      state.taskError = null;
+      state.weather = null;
+      state.weatherStatus = 'idle';
+      state.weatherError = null;
     },
   },
   extraReducers: (builder) => {
-    builder.addCase(fetchWeather.pending, (state) => {
-      state.weatherStatus = 'loading';
-      state.weatherError = null;
-    });
-    builder.addCase(fetchWeather.fulfilled, (state, action) => {
-      state.weather = action.payload;
-      state.weatherStatus = 'succeeded';
-    });
-    builder.addCase(fetchWeather.rejected, (state, action) => {
-      state.weather = null;
-      state.weatherStatus = 'failed';
-      state.weatherError = action.error.message || 'Unable to load weather data.';
-    });
+    builder
+      .addCase(fetchTasks.pending, (state) => {
+        state.tasksStatus = 'loading';
+        state.taskError = null;
+      })
+      .addCase(fetchTasks.fulfilled, (state, action) => {
+        state.tasks = action.payload;
+        state.tasksStatus = 'succeeded';
+      })
+      .addCase(fetchTasks.rejected, (state, action) => {
+        state.tasksStatus = 'failed';
+        state.taskError = action.error.message || 'Unable to load tasks.';
+      })
+      .addCase(addTask.fulfilled, (state, action) => {
+        state.tasks.unshift(action.payload);
+      })
+      .addCase(addTask.rejected, (state, action) => {
+        state.taskError = action.error.message || 'Unable to add task.';
+      })
+      .addCase(removeTask.fulfilled, (state, action) => {
+        state.tasks = state.tasks.filter((task) => task.id !== action.payload);
+      })
+      .addCase(removeTask.rejected, (state, action) => {
+        state.taskError = action.error.message || 'Unable to remove task.';
+      })
+      .addCase(toggleTaskComplete.fulfilled, (state, action) => {
+        state.tasks = applyTaskUpdates(state.tasks, action.payload.id, action.payload.updates);
+      })
+      .addCase(toggleTaskComplete.rejected, (state, action) => {
+        state.taskError = action.error.message || 'Unable to update task.';
+      })
+      .addCase(updateTaskStatus.fulfilled, (state, action) => {
+        state.tasks = applyTaskUpdates(state.tasks, action.payload.id, action.payload.updates);
+      })
+      .addCase(updateTaskStatus.rejected, (state, action) => {
+        state.taskError = action.error.message || 'Unable to update task status.';
+      })
+      .addCase(updateTask.fulfilled, (state, action) => {
+        state.tasks = applyTaskUpdates(state.tasks, action.payload.id, action.payload.updates);
+      })
+      .addCase(updateTask.rejected, (state, action) => {
+        state.taskError = action.error.message || 'Unable to save task.';
+      })
+      .addCase(clearCompleted.fulfilled, (state, action) => {
+        state.tasks = state.tasks.filter((task) => !action.payload.includes(task.id));
+      })
+      .addCase(clearCompleted.rejected, (state, action) => {
+        state.taskError = action.error.message || 'Unable to clear completed tasks.';
+      })
+      .addCase(fetchWeather.pending, (state) => {
+        state.weatherStatus = 'loading';
+        state.weatherError = null;
+      })
+      .addCase(fetchWeather.fulfilled, (state, action) => {
+        state.weather = action.payload;
+        state.weatherStatus = 'succeeded';
+      })
+      .addCase(fetchWeather.rejected, (state, action) => {
+        state.weather = null;
+        state.weatherStatus = 'failed';
+        state.weatherError = action.error.message || 'Unable to load weather data.';
+      });
   },
 });
 
-export const {
-  addTask,
-  removeTask,
-  toggleTaskComplete,
-  updateTaskStatus,
-  updateTask,
-  clearCompleted,
-} = taskSlice.actions;
+export const { resetTasks } = taskSlice.actions;
 export default taskSlice.reducer;

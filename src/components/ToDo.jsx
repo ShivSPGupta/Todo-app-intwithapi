@@ -87,6 +87,8 @@ function ToDo() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const tasks = useSelector((state) => state.tasks.tasks);
+  const tasksStatus = useSelector((state) => state.tasks.tasksStatus);
+  const taskError = useSelector((state) => state.tasks.taskError);
   const weather = useSelector((state) => state.tasks.weather);
   const weatherStatus = useSelector((state) => state.tasks.weatherStatus);
   const weatherError = useSelector((state) => state.tasks.weatherError);
@@ -167,7 +169,7 @@ function ToDo() {
     setDraft((current) => ({ ...current, [field]: value }));
   };
 
-  const handleAddTask = (event) => {
+  const handleAddTask = async (event) => {
     event.preventDefault();
 
     if (!draft.text.trim()) return;
@@ -185,9 +187,13 @@ function ToDo() {
       createdAt: Date.now(),
     };
 
-    dispatch(addTask(newTask));
-    dispatch(fetchWeather(newTask));
-    setDraft(defaultDraft);
+    try {
+      const savedTask = await dispatch(addTask(newTask)).unwrap();
+      dispatch(fetchWeather(savedTask));
+      setDraft(defaultDraft);
+    } catch {
+      // Keep the draft values in place so the user can retry after fixing auth or Firestore access.
+    }
   };
 
   const startEditing = (task) => {
@@ -571,7 +577,14 @@ function ToDo() {
             </div>
 
             <div className="task-list">
-              {filteredTasks.length === 0 ? (
+              {tasksStatus === 'loading' ? (
+                <div className="card border-0 shadow-sm">
+                  <div className="card-body p-5 text-center">
+                    <div className="spinner-border text-primary mb-3" role="status" aria-hidden="true" />
+                    <p className="text-muted mb-0">Loading your task workspace...</p>
+                  </div>
+                </div>
+              ) : filteredTasks.length === 0 ? (
                 <div className="card border-0 shadow-sm">
                   <div className="card-body p-5 text-center">
                     <h3 className="h5 mb-2">No matching tasks</h3>
@@ -755,6 +768,12 @@ function ToDo() {
                 })
               )}
             </div>
+
+            {taskError && (
+              <div className="alert alert-warning mt-3 mb-0" role="alert">
+                {taskError}
+              </div>
+            )}
 
             {openTaskCount > 0 && statusFilter === 'all' && (
               <div className="text-muted small mt-3">
