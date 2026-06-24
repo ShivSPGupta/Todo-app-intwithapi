@@ -29,6 +29,11 @@ const defaultDraft = {
 
 const categoryOptions = ['Personal', 'Work', 'Health', 'Learning', 'Errands'];
 const statusOptions = ['Backlog', 'In Progress', 'Done'];
+const statusOrder = {
+  Backlog: 0,
+  'In Progress': 1,
+  Done: 2,
+};
 const effortOptions = ['Small', 'Medium', 'Large'];
 const effortOrder = {
   Small: 0,
@@ -123,11 +128,14 @@ function ToDo() {
 
     return tasks
       .filter((task) => {
+        const taskText = String(task.text ?? '').toLowerCase();
+        const taskNotes = String(task.notes ?? '').toLowerCase();
+        const taskCategory = String(task.category ?? '').toLowerCase();
         const matchesQuery =
           !query ||
-          task.text.toLowerCase().includes(query) ||
-          task.notes.toLowerCase().includes(query) ||
-          task.category.toLowerCase().includes(query);
+          taskText.includes(query) ||
+          taskNotes.includes(query) ||
+          taskCategory.includes(query);
         const matchesStatus =
           statusFilter === 'all' ||
           (statusFilter === 'overdue' && isOverdue(task)) ||
@@ -158,7 +166,7 @@ function ToDo() {
         }
 
         if (sortBy === 'status') {
-          return statusOptions.indexOf(a.status) - statusOptions.indexOf(b.status) || b.createdAt - a.createdAt;
+          return (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99) || b.createdAt - a.createdAt;
         }
 
         return b.createdAt - a.createdAt;
@@ -175,7 +183,6 @@ function ToDo() {
     if (!draft.text.trim()) return;
 
     const newTask = {
-      id: Date.now(),
       text: draft.text.trim(),
       priority: draft.priority,
       status: 'Backlog',

@@ -55,9 +55,18 @@ const defaultTaskFields = {
   updatedAt: Date.now(),
 };
 
+const normalizeTaskId = (id) => String(id ?? '');
+
+const toTaskWritePayload = (task) => {
+  const normalizedTask = normalizeTask(task);
+  const { id: _TASK_ID, ...taskData } = normalizedTask;
+  return taskData;
+};
+
 const normalizeTask = (task) => ({
   ...defaultTaskFields,
   ...task,
+  id: normalizeTaskId(task.id),
   text: typeof task.text === 'string' ? task.text : '',
   priority: task.priority || 'Medium',
   status: task.completed ? 'Done' : task.status || 'Backlog',
@@ -85,32 +94,36 @@ export const fetchTasks = createAsyncThunk('tasks/fetchTasks', async (_, { getSt
   const tasksQuery = query(userTasksCollection(userId), orderBy('createdAt', 'desc'));
   const snapshot = await getDocs(tasksQuery);
 
-  return snapshot.docs.map((item) => normalizeTask({ id: item.id, ...item.data() }));
+  return snapshot.docs.map((item) => normalizeTask({ ...item.data(), id: item.id }));
 });
 
 export const addTask = createAsyncThunk('tasks/addTask', async (task, { getState }) => {
   const userId = requireUserId(getState);
-  const payload = normalizeTask({
+  const normalizedTask = normalizeTask({
     ...task,
+    id: undefined,
     status: 'Backlog',
     completed: false,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   });
+  const payload = toTaskWritePayload(normalizedTask);
 
   const docRef = await addDoc(userTasksCollection(userId), payload);
-  return { ...payload, id: docRef.id };
+  return normalizeTask({ ...payload, id: docRef.id });
 });
 
 export const removeTask = createAsyncThunk('tasks/removeTask', async (taskId, { getState }) => {
   const userId = requireUserId(getState);
-  await deleteDoc(doc(db, 'users', userId, 'tasks', taskId));
-  return taskId;
+  const normalizedTaskId = normalizeTaskId(taskId);
+  await deleteDoc(doc(db, 'users', userId, 'tasks', normalizedTaskId));
+  return normalizedTaskId;
 });
 
 export const toggleTaskComplete = createAsyncThunk('tasks/toggleTaskComplete', async (taskId, { getState }) => {
   const userId = requireUserId(getState);
-  const currentTask = getState().tasks.tasks.find((task) => task.id === taskId);
+  const normalizedTaskId = normalizeTaskId(taskId);
+  const currentTask = getState().tasks.tasks.find((task) => normalizeTaskId(task.id) === normalizedTaskId);
 
   if (!currentTask) {
     throw new Error('Task not found.');
@@ -123,32 +136,34 @@ export const toggleTaskComplete = createAsyncThunk('tasks/toggleTaskComplete', a
     updatedAt: Date.now(),
   };
 
-  await updateDoc(doc(db, 'users', userId, 'tasks', taskId), updates);
-  return { id: taskId, updates };
+  await updateDoc(doc(db, 'users', userId, 'tasks', normalizedTaskId), updates);
+  return { id: normalizedTaskId, updates };
 });
 
 export const updateTaskStatus = createAsyncThunk('tasks/updateTaskStatus', async ({ id, status }, { getState }) => {
   const userId = requireUserId(getState);
+  const normalizedTaskId = normalizeTaskId(id);
   const updates = {
     status,
     completed: status === 'Done',
     updatedAt: Date.now(),
   };
 
-  await updateDoc(doc(db, 'users', userId, 'tasks', id), updates);
-  return { id, updates };
+  await updateDoc(doc(db, 'users', userId, 'tasks', normalizedTaskId), updates);
+  return { id: normalizedTaskId, updates };
 });
 
 export const updateTask = createAsyncThunk('tasks/updateTask', async ({ id, updates }, { getState }) => {
   const userId = requireUserId(getState);
-  const payload = {
+  const normalizedTaskId = normalizeTaskId(id);
+  const payload = toTaskWritePayload({
     ...updates,
     completed: updates.status === 'Done',
     updatedAt: Date.now(),
-  };
+  });
 
-  await updateDoc(doc(db, 'users', userId, 'tasks', id), payload);
-  return { id, updates: payload };
+  await updateDoc(doc(db, 'users', userId, 'tasks', normalizedTaskId), payload);
+  return { id: normalizedTaskId, updates: payload };
 });
 
 export const clearCompleted = createAsyncThunk('tasks/clearCompleted', async (_, { getState }) => {
@@ -157,11 +172,11 @@ export const clearCompleted = createAsyncThunk('tasks/clearCompleted', async (_,
   const batch = writeBatch(db);
 
   doneTasks.forEach((task) => {
-    batch.delete(doc(db, 'users', userId, 'tasks', task.id));
+    batch.delete(doc(db, 'users', userId, 'tasks', normalizeTaskId(task.id)));
   });
 
   await batch.commit();
-  return doneTasks.map((task) => task.id);
+  return doneTasks.map((task) => normalizeTaskId(task.id));
 });
 
 export const fetchWeather = createAsyncThunk('tasks/fetchWeather', async (task) => {
@@ -185,7 +200,7 @@ export const fetchWeather = createAsyncThunk('tasks/fetchWeather', async (task) 
 });
 
 const applyTaskUpdates = (tasks, taskId, updates) => tasks.map((task) => (
-  task.id === taskId ? normalizeTask({ ...task, ...updates }) : task
+  normalizeTaskId(task.id) === normalizeTaskId(taskId) ? normalizeTask({ ...task, ...updates }) : normalizeTask(task)
 ));
 
 const taskSlice = createSlice({
@@ -229,7 +244,7 @@ const taskSlice = createSlice({
         state.taskError = action.error.message || 'Unable to add task.';
       })
       .addCase(removeTask.fulfilled, (state, action) => {
-        state.tasks = state.tasks.filter((task) => task.id !== action.payload);
+        state.tasks = state.tasks.filter((task) => normalizeTaskId(task.id) !== normalizeTaskId(action.payload));
       })
       .addCase(removeTask.rejected, (state, action) => {
         state.taskError = action.error.message || 'Unable to remove task.';
@@ -253,7 +268,7 @@ const taskSlice = createSlice({
         state.taskError = action.error.message || 'Unable to save task.';
       })
       .addCase(clearCompleted.fulfilled, (state, action) => {
-        state.tasks = state.tasks.filter((task) => !action.payload.includes(task.id));
+        state.tasks = state.tasks.filter((task) => !action.payload.includes(normalizeTaskId(task.id)));
       })
       .addCase(clearCompleted.rejected, (state, action) => {
         state.taskError = action.error.message || 'Unable to clear completed tasks.';
